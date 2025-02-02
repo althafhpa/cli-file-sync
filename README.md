@@ -169,7 +169,7 @@ cli-file-sync sync \
 ```
 
 ### Command Options
-- `--assets-source`: URL or path to the JSON asset definitions (required)
+- `--assets-source`: URL or path to the JSON asset definitions (optional)
 - `--max-concurrent`: Maximum number of concurrent downloads (default: 5)
 - `--download-delay`: Delay between downloads in milliseconds (default: 100)
 - `--download-timeout`: Download timeout in seconds (default: 30)
@@ -224,16 +224,59 @@ cli-file-sync sync \
   --download-password cdnpass
 ```
 
-### Output Format
-The sync command will show:
-1. Number of files found
-2. Total size of all files
-3. Number of image files
-4. Files grouped by MIME type
-5. Download progress for each file
+### Assets Source
 
-Example output:
+The `--assets-source` parameter is optional and can be:
+1. A local file path
+2. A URL (http:// or https://)
+3. Not provided (will use cached assets)
+
+When a URL or local file is provided:
+- The tool will first check for an existing cached file at `~/.config/cli-file-sync/assets.json`
+- If a cached file exists, it compares the new content with the cached content
+- If the content is identical, the sync operation is skipped
+- If changes are detected, all files are synced and the cache is updated
+- If no cache exists, all files are synced and the cache is created
+
+When no source is provided:
+- The tool will look for a cached assets file at `~/.config/cli-file-sync/assets.json`
+- If found, it will use this cached file for the sync operation
+- If not found, it will display an error message asking you to provide an assets source
+
+Examples:
+
+1. Using a URL (checks for changes before syncing):
+```bash
+cli-file-sync sync \
+  --assets-source https://api.example.com/files.json \
+  --base-url https://cdn.example.com
 ```
+
+2. Using a local file:
+```bash
+cli-file-sync sync \
+  --assets-source ./assets.json \
+  --base-url https://cdn.example.com
+```
+
+3. Using cached assets (if available):
+```bash
+cli-file-sync sync \
+  --base-url https://cdn.example.com
+```
+
+Example output when no changes detected:
+```
+Downloading assets source...
+Assets source downloaded to: /path/to/downloaded/file
+No changes detected in assets file
+```
+
+Example output when changes detected:
+```
+Downloading assets source...
+Assets source downloaded to: /path/to/downloaded/file
+Changes detected in assets file, proceeding with sync
 Found 25 files to sync
 Total size: 1234567 bytes
 Images: 15
@@ -245,6 +288,7 @@ text/plain: 2 files
 Successfully downloaded: example1.jpg
 Successfully downloaded: example2.png
 ...
+Updated assets cache
 ```
 
 ## URL-based Downloads

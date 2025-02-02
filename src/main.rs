@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use tokio::fs;
 use url::Url;
 use chrono::Utc;
+use dirs;
+use base64;
+use std::collections::HashMap;
 
 mod schema;
 mod downloader;
@@ -36,10 +39,10 @@ enum Commands {
     
     /// Sync files from source to destination
     Sync {
-        /// Source URL or path for assets JSON
+        /// Source URL or path for assets JSON. If not provided, uses cached assets.json
         #[arg(short, long)]
-        assets_source: String,
-
+        assets_source: Option<String>,
+        
         /// Base URL for resolving relative paths
         #[arg(short, long)]
         base_url: String,
@@ -120,8 +123,56 @@ enum Commands {
     },
 }
 
+/// Gets the default config directory for cli-file-sync
+fn get_config_dir() -> Result<PathBuf> {
+    Ok(dirs::config_dir()
+        .context("Failed to get config directory")?
+        .join("cli-file-sync"))
+}
+
+/// Gets the default assets file path
+fn get_default_assets_path() -> Result<PathBuf> {
+    Ok(get_config_dir()?.join("assets.json"))
+}
+
+/// Downloads assets source file if it's a URL and returns the local path
+async fn download_assets_source(
+    source: &str,
+    username: &Option<String>,
+    password: &Option<String>,
+) -> Result<PathBuf> {
+    let config_dir = get_config_dir()?;
+    
+    // Create config directory if it doesn't exist
+    tokio::fs::create_dir_all(&config_dir).await?;
+    
+    let assets_path = if source.starts_with("http://") || source.starts_with("https://") {
+        let assets_file = get_default_assets_path()?;
+        
+        // Download the assets file
+        let mut request = reqwest::Client::new().get(source);
+        if let (Some(username), Some(password)) = (username, password) {
+            request = request.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Basic {}", base64::encode(format!("{}:{}", username, password)))
+            );
+        }
+        
+        let response = request.send().await?;
+        let content = response.text().await?;
+        
+        // Write to local file
+        tokio::fs::write(&assets_file, content).await?;
+        assets_file
+    } else {
+        PathBuf::from(source)
+    };
+    
+    Ok(assets_path)
+}
+
 async fn handle_sync_command(
-    assets_source: String,
+    assets_source: Option<String>,
     base_url: String,
     source_username: Option<String>,
     source_password: Option<String>,
@@ -133,28 +184,55 @@ async fn handle_sync_command(
     max_retries: Option<usize>,
     max_file_size: Option<u64>,
 ) -> Result<()> {
-    // Load assets JSON from file or URL
-    let assets_json = if assets_source.starts_with("http://") || assets_source.starts_with("https://") {
-        // Create HTTP client with auth for assets JSON download
-        let mut request = reqwest::Client::new().get(&assets_source);
-        if let (Some(username), Some(password)) = (&source_username, &source_password) {
-            request = request.header(
-                reqwest::header::AUTHORIZATION,
-                format!("Basic {}", base64::encode(format!("{}:{}", username, password)))
-            );
+    let default_path = get_default_assets_path()?;
+    
+    // Get the assets file path and content
+    let (local_assets_path, new_assets_json) = match assets_source {
+        Some(source) => {
+            // If source is provided, download it
+            println!("Downloading assets source...");
+            let path = download_assets_source(
+                &source,
+                &source_username,
+                &source_password,
+            ).await?;
+            let content = tokio::fs::read_to_string(&path).await
+                .with_context(|| format!("Failed to read assets file: {}", path.display()))?;
+            println!("Assets source downloaded to: {}", path.display());
+            (path, content)
         }
-        request.send().await?.text().await?
-    } else {
-        tokio::fs::read_to_string(&assets_source).await?
+        None => {
+            // If no source provided, try to use cached file
+            if !default_path.exists() {
+                anyhow::bail!(
+                    "No assets source provided and no cached assets found at {}. \
+                    Please provide an assets source using --assets-source", 
+                    default_path.display()
+                );
+            }
+            println!("Using cached assets from: {}", default_path.display());
+            let content = tokio::fs::read_to_string(&default_path).await
+                .with_context(|| format!("Failed to read assets file: {}", default_path.display()))?;
+            (default_path.clone(), content)
+        }
     };
 
-    let assets: DrupalFileAssets = serde_json::from_str(&assets_json)?;
-    
-    // Validate the assets
-    if let Err(e) = assets.validate() {
-        return Err(anyhow::anyhow!("Invalid assets JSON: {}", e));
+    // Check if we need to sync
+    if assets_source.is_some() && default_path.exists() && local_assets_path != default_path {
+        // Compare new content with cached content
+        let cached_json = tokio::fs::read_to_string(&default_path).await
+            .with_context(|| format!("Failed to read cached assets: {}", default_path.display()))?;
+            
+        if new_assets_json == cached_json {
+            println!("No changes detected in assets file");
+            return Ok(());
+        }
+        println!("Changes detected in assets file, proceeding with sync");
     }
 
+    // Parse the assets JSON
+    let assets: DrupalFileAssets = serde_json::from_str(&new_assets_json)?;
+    
     // Print summary
     println!("Found {} files to sync", assets.files.len());
     println!("Total size: {} bytes", assets.total_size());
@@ -165,7 +243,7 @@ async fn handle_sync_command(
         println!("{}: {} files", mime, files.len());
     }
 
-    // Configure downloader with download-specific auth
+    // Configure downloader
     let download_config = DownloadConfig {
         username: download_username,
         password: download_password,
@@ -179,6 +257,12 @@ async fn handle_sync_command(
 
     let mut downloader = Downloader::new(download_config);
     downloader.download_files(&assets.files).await?;
+
+    // If we downloaded from a new source, update the cache
+    if assets_source.is_some() && local_assets_path != default_path {
+        tokio::fs::copy(local_assets_path, default_path).await?;
+        println!("Updated assets cache");
+    }
 
     Ok(())
 }
@@ -224,7 +308,7 @@ async fn handle_watch_command(
         println!("Running sync at {}", Utc::now());
         
         if let Err(e) = handle_sync_command(
-            assets_source.clone(),
+            Some(assets_source.clone()),
             base_url.clone(),
             username.clone(),
             password.clone(),
