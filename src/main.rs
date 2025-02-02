@@ -34,39 +34,47 @@ enum Commands {
         desti_path: Option<String>,
     },
     
-    /// Sync files based on configuration
-    Sync { 
-        /// JSON file containing assets metadata
-        #[arg(long = "assets-metadata")]
+    /// Sync files from source to destination
+    Sync {
+        /// Source URL or path for assets JSON
+        #[arg(short, long)]
         assets_source: String,
 
-        /// Base URL for downloading assets (e.g., https://example.com)
-        #[arg(long = "assets-base-url")]
+        /// Base URL for resolving relative paths
+        #[arg(short, long)]
         base_url: String,
 
-        /// Optional HTTP Basic Auth username
-        #[arg(long = "auth-username")]
-        username: Option<String>,
+        /// Username for assets source authentication
+        #[arg(long)]
+        source_username: Option<String>,
 
-        /// Optional HTTP Basic Auth password
-        #[arg(long = "auth-password")]
-        password: Option<String>,
+        /// Password for assets source authentication
+        #[arg(long)]
+        source_password: Option<String>,
+
+        /// Username for file downloads authentication
+        #[arg(long)]
+        download_username: Option<String>,
+
+        /// Password for file downloads authentication
+        #[arg(long)]
+        download_password: Option<String>,
 
         /// Maximum concurrent downloads
-        #[arg(long)]
-        max_concurrent: Option<usize>,
+        #[arg(long, default_value_t = 5)]
+        max_concurrent: usize,
 
         /// Delay between downloads in milliseconds
-        #[arg(long)]
-        download_delay: Option<u64>,
+        #[arg(long, default_value_t = 0)]
+        download_delay: u64,
 
         /// Download timeout in seconds
-        #[arg(long)]
-        download_timeout: Option<u64>,
+        #[arg(long, default_value_t = 30)]
+        download_timeout: u64,
 
-        /// Maximum retry attempts per file
-        #[arg(long)]
-        max_retries: Option<usize>,
+        /// Maximum retry attempts for failed downloads
+        #[arg(long, default_value_t = 3)]
+        max_retries: usize,
 
         /// Maximum file size in bytes
         #[arg(long)]
@@ -115,8 +123,10 @@ enum Commands {
 async fn handle_sync_command(
     assets_source: String,
     base_url: String,
-    username: Option<String>,
-    password: Option<String>,
+    source_username: Option<String>,
+    source_password: Option<String>,
+    download_username: Option<String>,
+    download_password: Option<String>,
     max_concurrent: Option<usize>,
     download_delay: Option<u64>,
     download_timeout: Option<u64>,
@@ -127,7 +137,7 @@ async fn handle_sync_command(
     let assets_json = if assets_source.starts_with("http://") || assets_source.starts_with("https://") {
         // Create HTTP client with auth for assets JSON download
         let mut request = reqwest::Client::new().get(&assets_source);
-        if let (Some(username), Some(password)) = (&username, &password) {
+        if let (Some(username), Some(password)) = (&source_username, &source_password) {
             request = request.header(
                 reqwest::header::AUTHORIZATION,
                 format!("Basic {}", base64::encode(format!("{}:{}", username, password)))
@@ -155,16 +165,16 @@ async fn handle_sync_command(
         println!("{}: {} files", mime, files.len());
     }
 
-    // Configure downloader
+    // Configure downloader with download-specific auth
     let download_config = DownloadConfig {
+        username: download_username,
+        password: download_password,
         max_concurrent: max_concurrent.unwrap_or(5),
         download_delay: download_delay.unwrap_or(0),
         download_timeout: download_timeout.unwrap_or(30),
         max_retries: max_retries.unwrap_or(3),
         max_file_size,
         base_url: Some(base_url),
-        username,
-        password,
     };
 
     let mut downloader = Downloader::new(download_config);
@@ -244,8 +254,10 @@ async fn main() -> Result<()> {
         Commands::Sync { 
             assets_source,
             base_url,
-            username,
-            password,
+            source_username,
+            source_password,
+            download_username,
+            download_password,
             max_concurrent,
             download_delay,
             download_timeout,
@@ -255,12 +267,14 @@ async fn main() -> Result<()> {
             handle_sync_command(
                 assets_source,
                 base_url,
-                username,
-                password,
-                max_concurrent,
-                download_delay,
-                download_timeout,
-                max_retries,
+                source_username,
+                source_password,
+                download_username,
+                download_password,
+                Some(max_concurrent),
+                Some(download_delay),
+                Some(download_timeout),
+                Some(max_retries),
                 max_file_size,
             ).await
         }

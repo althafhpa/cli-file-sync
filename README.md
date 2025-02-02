@@ -191,6 +191,39 @@ export DRUPAL_PASS=password
 cli-file-sync sync --assets-source https://example.com/files.json
 ```
 
+### Authentication
+
+The tool supports separate authentication for the assets source and file downloads:
+
+1. **Assets Source Authentication** (for accessing the JSON metadata):
+```bash
+cli-file-sync sync \
+  --assets-source https://api.example.com/files.json \
+  --source-username apiuser \
+  --source-password apipass \
+  --base-url https://cdn.example.com
+```
+
+2. **Download Authentication** (for downloading the actual files):
+```bash
+cli-file-sync sync \
+  --assets-source https://api.example.com/files.json \
+  --base-url https://cdn.example.com \
+  --download-username cdnuser \
+  --download-password cdnpass
+```
+
+3. **Using Both** (when source and downloads require different authentication):
+```bash
+cli-file-sync sync \
+  --assets-source https://api.example.com/files.json \
+  --base-url https://cdn.example.com \
+  --source-username apiuser \
+  --source-password apipass \
+  --download-username cdnuser \
+  --download-password cdnpass
+```
+
 ### Output Format
 The sync command will show:
 1. Number of files found
