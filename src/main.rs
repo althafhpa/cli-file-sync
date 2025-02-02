@@ -7,6 +7,7 @@ use chrono::Utc;
 use dirs;
 use base64;
 use std::collections::HashMap;
+use std::env;
 
 mod schema;
 mod downloader;
@@ -171,6 +172,21 @@ async fn download_assets_source(
     Ok(assets_path)
 }
 
+fn get_default_auth() -> ((Option<String>, Option<String>), (Option<String>, Option<String>)) {
+    (
+        // Source auth
+        (
+            env::var("CLI_SYNC_SOURCE_USER").ok(),
+            env::var("CLI_SYNC_SOURCE_PASS").ok(),
+        ),
+        // Download auth
+        (
+            env::var("CLI_SYNC_DOWNLOAD_USER").ok(),
+            env::var("CLI_SYNC_DOWNLOAD_PASS").ok(),
+        )
+    )
+}
+
 async fn handle_sync_command(
     assets_source: Option<String>,
     base_url: String,
@@ -184,6 +200,13 @@ async fn handle_sync_command(
     max_retries: Option<usize>,
     max_file_size: Option<u64>,
 ) -> Result<()> {
+    // Get default auth from environment if not provided
+    let ((default_source_user, default_source_pass), (default_download_user, default_download_pass)) = get_default_auth();
+    let source_username = source_username.or(default_source_user);
+    let source_password = source_password.or(default_source_pass);
+    let download_username = download_username.or(default_download_user);
+    let download_password = download_password.or(default_download_pass);
+
     let default_path = get_default_assets_path()?;
     
     // Get the assets file path and content

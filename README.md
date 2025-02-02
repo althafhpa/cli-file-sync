@@ -44,6 +44,53 @@ The binary will be available at `target/release/cli-file-sync`
 - Cargo (Rust's package manager)
 - Git
 
+### Installing Rust and Cargo
+
+1. **Using rustup (recommended)**
+
+   Install Rust and Cargo using rustup, the official Rust installer:
+
+   ```bash
+   # On macOS, Linux, or WSL
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+   # On Windows, download and run rustup-init.exe from:
+   # https://rustup.rs
+   ```
+
+   After installation:
+   1. Follow the on-screen instructions
+   2. Restart your terminal
+   3. Verify installation:
+      ```bash
+      rustc --version  # Should show 1.70 or higher
+      cargo --version
+      ```
+
+2. **Using package managers**
+
+   Alternatively, install via package managers:
+
+   ```bash
+   # On macOS using Homebrew
+   brew install rustup-init
+   rustup-init  # Run this after installation
+   
+   # On Ubuntu/Debian
+   sudo apt update
+   sudo apt install rustc cargo
+   ```
+
+   Note: Package managers might not have the latest version. Using rustup is recommended.
+
+3. **Updating Rust**
+
+   If you already have Rust installed, update to the latest version:
+
+   ```bash
+   rustup update
+   ```
+
 ## Quick Start
 
 ```bash
@@ -184,8 +231,10 @@ cli-file-sync sync --assets-source ./sample-assets.json
 ### Example with Authentication
 ```bash
 # Set environment variables for authentication
-export DRUPAL_USER=username
-export DRUPAL_PASS=password
+export CLI_SYNC_SOURCE_USER="your-source-username"
+export CLI_SYNC_SOURCE_PASS="your-source-password"
+export CLI_SYNC_DOWNLOAD_USER="your-download-username"
+export CLI_SYNC_DOWNLOAD_PASS="your-download-password"
 
 # Run sync command
 cli-file-sync sync --assets-source https://example.com/files.json
@@ -193,7 +242,21 @@ cli-file-sync sync --assets-source https://example.com/files.json
 
 ### Authentication
 
-The tool supports separate authentication for the assets source and file downloads:
+The tool supports separate authentication for the assets source and file downloads. You can set up default credentials using environment variables:
+
+```bash
+# Set up default credentials for assets source (JSON metadata)
+export CLI_SYNC_SOURCE_USER="your-source-username"
+export CLI_SYNC_SOURCE_PASS="your-source-password"
+
+# Set up default credentials for file downloads
+export CLI_SYNC_DOWNLOAD_USER="your-download-username"
+export CLI_SYNC_DOWNLOAD_PASS="your-download-password"
+```
+
+These environment variables can be added to your shell configuration file (e.g., `~/.bashrc`, `~/.zshrc`) for persistence.
+
+You can still override these using command-line arguments:
 
 1. **Assets Source Authentication** (for accessing the JSON metadata):
 ```bash
