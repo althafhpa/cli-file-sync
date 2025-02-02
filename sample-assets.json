@@ -1,0 +1,44 @@
+[
+  {
+    "fid": "48",
+    "filename": "sample-image.jpg",
+    "uri": "public://sample-image.jpg",
+    "real_path": "sites/default/files/sample-image.jpg",
+    "source": "file",
+    "metadata": {
+      "filesize": 178567,
+      "filemime": "image/jpeg",
+      "changed": 1349155742,
+      "created": 1349155742,
+      "md5": "5fe94c2b9ecab79578630eb259eaf8a8",
+      "permissions": "0664",
+      "uid": 1000,
+      "gid": 1000,
+      "inode": 124726
+    },
+    "usage": {
+      "file": ["media"]
+    }
+  },
+  {
+    "fid": "50",
+    "filename": "sample-document.pdf",
+    "uri": "public://sample-document.pdf",
+    "real_path": "sites/default/files/sample-document.pdf",
+    "source": "file",
+    "metadata": {
+      "filesize": 1024567,
+      "filemime": "application/pdf",
+      "changed": 1349155999,
+      "created": 1349155900,
+      "md5": "7ae94c2b9ecab79578630eb259eaf8b9",
+      "permissions": "0664",
+      "uid": 1000,
+      "gid": 1000,
+      "inode": 124727
+    },
+    "usage": {
+      "file": ["document"]
+    }
+  }
+]

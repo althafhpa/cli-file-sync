@@ -1,0 +1,95 @@
+# Source Server Commands
+
+# Build metadata JSON
+ddev drush assets-metadata:rebuild
+
+# Force rebuild via browser
+curl -k https://uts-pnext.ddev.site/public-files.json?refresh=1
+
+# View changes since last build
+ddev drush assets-metadata:diff
+
+# CLI Commands
+
+# Check for changes (dry run)
+cli-file-sync check \
+  --source https://source.example.com/public-files.json \
+  --dest /path/to/files \
+  --verbose
+
+# Sync files with failure reporting
+cli-file-sync sync \
+  --source https://source.example.com/public-files.json \
+  --dest /path/to/files \
+  --concurrency 4 \
+  --retry 3 \
+  --report-file sync-failures.json
+
+# View failed downloads report
+jq . sync-failures.json
+
+# Retry failed downloads only
+cli-file-sync retry \
+  --report-file sync-failures.json \
+  --retry 3
+
+# Verify after sync
+cli-file-sync verify \
+  --source https://source.example.com/public-files.json \
+  --dest /path/to/files
+
+# Fix permissions
+cli-file-sync fix-perms \
+  --dest /path/to/files \
+  --uid 33 \
+  --gid 33
+
+# Clean up orphaned files
+cli-file-sync cleanup \
+  --source https://source.example.com/public-files.json \
+  --dest /path/to/files \
+  --dry-run
+
+# Full sync workflow
+cli-file-sync sync \
+  --source https://source.example.com/public-files.json \
+  --dest /path/to/files \
+  --auto-verify \
+  --fix-perms \
+  --cleanup
+
+# CI/CD example
+#!/bin/bash
+set -euo pipefail
+
+SOURCE_URL="https://prod.example.com/public-files.json"
+DEST_PATH="/var/www/html/sites/default/files"
+REPORT_FILE="sync-failures-$(date +%Y%m%d-%H%M%S).json"
+
+# Sync files and generate report
+cli-file-sync sync \
+  --source "$SOURCE_URL" \
+  --dest "$DEST_PATH" \
+  --report-file "$REPORT_FILE" \
+  --concurrency 4 \
+  --retry 3
+
+# Check if there were failures
+if [ -f "$REPORT_FILE" ]; then
+  FAILED_COUNT=$(jq '.summary.failed' "$REPORT_FILE")
+  if [ "$FAILED_COUNT" -gt 0 ]; then
+    echo "Warning: $FAILED_COUNT files failed to sync. See $REPORT_FILE for details"
+    
+    # Optional: Send notification
+    if [ -n "${SLACK_WEBHOOK:-}" ]; then
+      curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\":\"❌ File sync failed: $FAILED_COUNT files failed to download. See $REPORT_FILE\"}" \
+        "$SLACK_WEBHOOK"
+    fi
+    
+    exit 1
+  fi
+fi
+
+# Example crontab entry (every 6 hours)
+# 0 */6 * * * /usr/local/bin/cli-file-sync sync --source https://prod.example.com/public-files.json --dest /var/www/html/sites/default/files --report-file /var/log/sync-failures-$(date +\%Y\%m\%d-\%H\%M\%S).json

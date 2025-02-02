@@ -1,0 +1,1 @@
+/Users/164987/uts-pnext-tools/cli-file-sync/target/debug/cli-file-sync: /Users/164987/uts-pnext-tools/cli-file-sync/src/assets.rs /Users/164987/uts-pnext-tools/cli-file-sync/src/config.rs /Users/164987/uts-pnext-tools/cli-file-sync/src/downloader.rs /Users/164987/uts-pnext-tools/cli-file-sync/src/main.rs /Users/164987/uts-pnext-tools/cli-file-sync/src/schema.rs
