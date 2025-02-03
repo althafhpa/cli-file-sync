@@ -14,8 +14,24 @@ pub struct CliConfig {
     pub base_url: Option<String>,
     /// Destination path for synced files
     pub desti_path: String,
-    /// Maximum number of log files to keep
+    /// Username for metadata source
+    pub source_username: Option<String>,
+    /// Password for metadata source
+    pub source_password: Option<String>,
+    /// Username for file downloads
+    pub download_username: Option<String>,
+    /// Password for file downloads
+    pub download_password: Option<String>,
+    /// Maximum number of log files to keep (default: 10)
     pub max_logs: u32,
+    /// Maximum number of concurrent downloads (default: 5)
+    pub max_concurrent: usize,
+    /// Delay between downloads in milliseconds (default: 100)
+    pub download_delay: u64,
+    /// Download timeout in seconds (default: 30)
+    pub download_timeout: u64,
+    /// Maximum retry attempts for failed downloads (default: 3)
+    pub max_retries: usize,
     /// Time-to-live for automatic sync (in seconds)
     pub ttl: Option<u64>,
     /// Timestamp of the last successful sync
@@ -23,13 +39,21 @@ pub struct CliConfig {
 }
 
 impl CliConfig {
-    /// Creates a new configuration instance
+    /// Creates a new configuration instance with default values
     pub fn new(id: String, desti_path: String) -> Self {
         Self {
             id,
             base_url: None,
             desti_path,
-            max_logs: 100,
+            source_username: None,
+            source_password: None,
+            download_username: None,
+            download_password: None,
+            max_logs: 10,                  // Default to 10 log files
+            max_concurrent: 5,             // Default to 5 concurrent downloads
+            download_delay: 100,           // Default to 100ms delay
+            download_timeout: 30,          // Default to 30s timeout
+            max_retries: 3,               // Default to 3 retries
             ttl: None,
             last_sync: None,
         }

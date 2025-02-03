@@ -70,7 +70,12 @@ impl SyncResult {
 }
 
 /// Checks if a file needs to be synced based on metadata
-pub fn needs_sync(source_meta: &crate::Asset, dest_path: &PathBuf) -> bool {
+pub fn needs_sync(source_meta: &crate::Asset, dest_path: &PathBuf, force: bool) -> bool {
+    // If force is true, always sync
+    if force {
+        return true;
+    }
+
     // If file doesn't exist, it needs sync
     if !dest_path.exists() {
         return true;

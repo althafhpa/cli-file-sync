@@ -1,0 +1,27 @@
+# Ignore downloads folder and its contents
+downloads/
+downloads/*
+
+# Data files
+assets.json
+failed_downloads.json
+
+# Rust specific ignores
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

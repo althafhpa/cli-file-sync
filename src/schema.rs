@@ -2,66 +2,59 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Represents a file's metadata from Drupal
+/// Represents the source information in the metadata
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FileMetadata {
-    pub filesize: u64,
-    pub filemime: String,
-    pub changed: i64,
-    pub created: i64,
-    pub md5: String,
-    pub permissions: String,
-    pub uid: u64,
-    pub gid: u64,
-    pub inode: u64,
-}
-
-/// Represents where the file is used in Drupal
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FileUsage {
-    pub file: Vec<String>,
+pub struct DrupalSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub version: String,
 }
 
 /// Represents a single file asset from Drupal
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DrupalFileAsset {
     pub id: String,
     pub filename: String,
     pub uri: String,
+    #[serde(default)]
     pub path: String,
     pub mime: String,
-    pub size: u64,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
     pub created: i64,
+    #[serde(default)]
     pub changed: i64,
+    #[serde(default)]
     pub scheme: String,
 }
 
 impl DrupalFileAsset {
     /// Validates that the file asset has all required fields and valid values
     pub fn validate(&self) -> Result<(), String> {
-        // Check required fields are not empty
         if self.id.is_empty() {
-            return Err("File ID is required".to_string());
+            return Err("Missing ID".to_string());
         }
         if self.filename.is_empty() {
-            return Err("Filename is required".to_string());
+            return Err("Missing filename".to_string());
         }
         if self.uri.is_empty() {
-            return Err("URI is required".to_string());
-        }
-        if self.path.is_empty() {
-            return Err("Path is required".to_string());
+            return Err("Missing URI".to_string());
         }
         if self.mime.is_empty() {
-            return Err("MIME type is required".to_string());
+            return Err("Missing MIME type".to_string());
         }
-
         Ok(())
     }
 
     /// Gets the local destination path for this file
     pub fn get_local_path(&self, base_path: &str) -> String {
-        format!("{}/{}", base_path, self.filename)
+        if self.path.is_empty() {
+            // If path is empty, use the filename
+            format!("{}/{}", base_path.trim_end_matches('/'), self.filename)
+        } else {
+            format!("{}/{}", base_path.trim_end_matches('/'), self.path.trim_start_matches('/'))
+        }
     }
 
     /// Checks if the file is an image
@@ -71,25 +64,28 @@ impl DrupalFileAsset {
 
     /// Gets the file extension
     pub fn get_extension(&self) -> Option<String> {
-        Path::new(&self.filename)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|s| s.to_string())
+        self.filename
+            .rsplit('.')
+            .next()
+            .map(|s| s.to_lowercase())
     }
 }
 
-/// Represents a collection of file assets from Drupal
+/// Represents a collection of file assets from Drupal with metadata
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DrupalFileAssets {
+pub struct DrupalFileAssetsWrapper {
+    pub version: String,
+    pub generated: i64,
+    pub source: DrupalSource,
     pub files: Vec<DrupalFileAsset>,
 }
 
-impl DrupalFileAssets {
+impl DrupalFileAssetsWrapper {
     /// Validates all file assets in the collection
     pub fn validate(&self) -> Result<(), String> {
         for asset in &self.files {
             if let Err(e) = asset.validate() {
-                return Err(format!("Invalid asset {}: {}", asset.id, e));
+                return Err(format!("Asset {} validation failed: {}", asset.id, e));
             }
         }
         Ok(())
@@ -97,23 +93,39 @@ impl DrupalFileAssets {
 
     /// Gets total size of all files
     pub fn total_size(&self) -> u64 {
-        self.files.iter().map(|asset| asset.size).sum()
+        self.files.iter().filter_map(|f| f.size).sum()
     }
 
     /// Gets count of image files
     pub fn image_count(&self) -> usize {
-        self.files.iter().filter(|asset| asset.is_image()).count()
+        self.files.iter().filter(|f| f.is_image()).count()
     }
 
     /// Gets files grouped by MIME type
-    pub fn group_by_mime(&self) -> HashMap<String, Vec<&DrupalFileAsset>> {
-        let mut groups = HashMap::new();
+    pub fn group_by_mime(&self) -> HashMap<String, Vec<DrupalFileAsset>> {
+        let mut groups: HashMap<String, Vec<DrupalFileAsset>> = HashMap::new();
         for asset in &self.files {
             groups
                 .entry(asset.mime.clone())
-                .or_insert_with(Vec::new)
-                .push(asset);
+                .or_default()
+                .push(asset.clone());
         }
         groups
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DrupalFileAssetsResponse {
+    Wrapper(DrupalFileAssetsWrapper),
+    Array(Vec<DrupalFileAsset>),
+}
+
+impl DrupalFileAssetsResponse {
+    pub fn into_vec(self) -> Vec<DrupalFileAsset> {
+        match self {
+            DrupalFileAssetsResponse::Wrapper(wrapper) => wrapper.files,
+            DrupalFileAssetsResponse::Array(assets) => assets,
+        }
     }
 }

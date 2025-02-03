@@ -1,22 +1,20 @@
-use anyhow::Result;
+#![allow(warnings)]
+
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
-use tokio::fs;
-use url::Url;
-use chrono::Utc;
-use dirs;
-use base64;
-use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::env;
+use tokio::fs;
+use std::collections::HashMap;
+use serde_json;
+
+use crate::schema::{DrupalFileAsset, DrupalFileAssetsWrapper, DrupalFileAssetsResponse};
+use crate::downloader::{Downloader, DownloadConfig};
+use crate::config::CliConfig;
 
 mod schema;
 mod downloader;
-mod assets;
 mod config;
-
-use schema::DrupalFileAssets;
-use downloader::{DownloadConfig, Downloader};
-use assets::{generate_asset_listing, AssetListingConfig};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -27,326 +25,348 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Configure CLI settings
-    Config { 
+    /// Sync files from a remote source
+    Sync {
+        /// Path to assets metadata file or URL
+        #[arg(long)]
+        assets_metadata: Option<String>,
+
+        /// Destination directory for downloaded files
+        #[arg(long)]
+        destination: Option<PathBuf>,
+
         /// Base URL for file downloads
         #[arg(long)]
-        base_url: Option<String>,
-        
-        /// Destination path for downloaded files
-        #[arg(long)]
-        desti_path: Option<String>,
-    },
-    
-    /// Sync files from source to destination
-    Sync {
-        /// Source URL or path for assets JSON. If not provided, uses cached assets.json
-        #[arg(short, long)]
-        assets_source: Option<String>,
-        
-        /// Base URL for resolving relative paths
-        #[arg(short, long)]
         base_url: String,
 
-        /// Username for assets source authentication
+        /// Maximum number of concurrent downloads
+        #[arg(long, default_value_t = 4)]
+        max_concurrent: usize,
+
+        /// Username for metadata source
         #[arg(long)]
         source_username: Option<String>,
 
-        /// Password for assets source authentication
+        /// Password for metadata source
         #[arg(long)]
         source_password: Option<String>,
 
-        /// Username for file downloads authentication
+        /// Username for file downloads
         #[arg(long)]
         download_username: Option<String>,
 
-        /// Password for file downloads authentication
+        /// Password for file downloads
         #[arg(long)]
         download_password: Option<String>,
 
-        /// Maximum concurrent downloads
-        #[arg(long, default_value_t = 5)]
-        max_concurrent: usize,
-
         /// Delay between downloads in milliseconds
-        #[arg(long, default_value_t = 0)]
+        #[arg(long, default_value_t = 100)]
         download_delay: u64,
 
         /// Download timeout in seconds
-        #[arg(long, default_value_t = 30)]
+        #[arg(long, default_value_t = 60)]
         download_timeout: u64,
 
-        /// Maximum retry attempts for failed downloads
+        /// Maximum number of retries for failed downloads
         #[arg(long, default_value_t = 3)]
         max_retries: usize,
 
-        /// Maximum file size in bytes
+        /// Force download even if file exists
         #[arg(long)]
-        max_file_size: Option<u64>,
+        force: bool,
     },
 
-    /// Watch and automatically sync files periodically
-    Watch {
-        /// JSON file containing assets metadata
-        #[arg(long = "assets-metadata")]
-        assets_source: String,
-
-        /// Base URL for downloading assets
-        #[arg(long = "assets-base-url")]
-        base_url: String,
-
-        /// Sync interval in seconds (default: 24 hours)
-        #[arg(long, default_value = "86400")]  // 24 hours = 86400 seconds
-        interval: u64,
-
-        /// Optional HTTP Basic Auth username
-        #[arg(long = "auth-username")]
-        username: Option<String>,
-
-        /// Optional HTTP Basic Auth password
-        #[arg(long = "auth-password")]
-        password: Option<String>,
-    },
-
-    /// List assets and generate report
-    List {
-        /// Source directory or URL containing assets
-        #[arg(long)]
-        assets_source: String,
-
-        /// Output path for the asset listing
-        #[arg(long)]
-        output: String,
-
-        /// Base URL for generating download URLs
+    /// Configure the CLI
+    Config {
+        /// Base URL for file downloads
         #[arg(long)]
         base_url: Option<String>,
+
+        /// Default destination path for downloads
+        #[arg(long)]
+        desti_path: Option<String>,
+
+        /// Username for metadata source
+        #[arg(long)]
+        source_username: Option<String>,
+
+        /// Password for metadata source
+        #[arg(long)]
+        source_password: Option<String>,
+
+        /// Username for file downloads
+        #[arg(long)]
+        download_username: Option<String>,
+
+        /// Password for file downloads
+        #[arg(long)]
+        download_password: Option<String>,
+
+        /// Delay between downloads in milliseconds
+        #[arg(long, default_value_t = 100)]
+        download_delay: u64,
+
+        /// Download timeout in seconds
+        #[arg(long, default_value_t = 60)]
+        download_timeout: u64,
+
+        /// Maximum number of retries for failed downloads
+        #[arg(long, default_value_t = 3)]
+        max_retries: usize,
+
+        /// Force download even if file exists
+        #[arg(long)]
+        force: bool,
     },
 }
 
-/// Gets the default config directory for cli-file-sync
-fn get_config_dir() -> Result<PathBuf> {
+async fn get_config_dir() -> Result<PathBuf> {
     Ok(dirs::config_dir()
         .context("Failed to get config directory")?
         .join("cli-file-sync"))
 }
 
-/// Gets the default assets file path
-fn get_default_assets_path() -> Result<PathBuf> {
-    Ok(get_config_dir()?.join("assets.json"))
+/// Compare two asset lists and return only the changed or new assets
+fn get_changed_assets(old_assets: &[DrupalFileAsset], new_assets: &[DrupalFileAsset]) -> Vec<DrupalFileAsset> {
+    let mut changed = Vec::new();
+    let old_map: HashMap<_, _> = old_assets
+        .iter()
+        .map(|asset| (asset.id.clone(), asset))
+        .collect();
+
+    for new_asset in new_assets {
+        match old_map.get(&new_asset.id) {
+            Some(old_asset) => {
+                if old_asset.changed != new_asset.changed {
+                    changed.push(new_asset.clone());
+                }
+            }
+            None => {
+                changed.push(new_asset.clone());
+            }
+        }
+    }
+
+    changed
 }
 
-/// Downloads assets source file if it's a URL and returns the local path
-async fn download_assets_source(
-    source: &str,
-    username: &Option<String>,
-    password: &Option<String>,
-) -> Result<PathBuf> {
-    let config_dir = get_config_dir()?;
+async fn download_metadata(source: &str, destination: &Path, force: bool, username: Option<String>, password: Option<String>) -> Result<Vec<DrupalFileAsset>> {
+    // Create destination directory if it doesn't exist
+    println!("Ensuring destination directory exists: {}", destination.display());
+    if !destination.exists() {
+        tokio::fs::create_dir_all(destination).await.context(format!("Failed to create directory: {}", destination.display()))?;
+    }
+
+    let metadata_path = destination.join("assets.json");
+    println!("Will save metadata to: {}", metadata_path.display());
     
-    // Create config directory if it doesn't exist
-    tokio::fs::create_dir_all(&config_dir).await?;
-    
-    let assets_path = if source.starts_with("http://") || source.starts_with("https://") {
-        let assets_file = get_default_assets_path()?;
+    // First, always download or read the content
+    let content = if source.starts_with("http://") || source.starts_with("https://") {
+        println!("Downloading metadata from {}", source);
+        println!("This may take a while for large files...");
         
-        // Download the assets file
         let mut request = reqwest::Client::new().get(source);
+        
         if let (Some(username), Some(password)) = (username, password) {
-            request = request.header(
-                reqwest::header::AUTHORIZATION,
-                format!("Basic {}", base64::encode(format!("{}:{}", username, password)))
-            );
+            request = request.basic_auth(username, Some(password));
         }
         
-        let response = request.send().await?;
-        let content = response.text().await?;
+        let response = request.send().await.context("Failed to send HTTP request")?;
+        println!("Response status: {}", response.status());
         
-        // Write to local file
-        tokio::fs::write(&assets_file, content).await?;
-        assets_file
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to download metadata: HTTP {} {}",
+                response.status().as_u16(),
+                response.status().as_str()
+            ));
+        }
+        
+        let content = response.text().await.context("Failed to read response body")?;
+        println!("Download complete! Content length: {} bytes", content.len());
+        if content.len() > 0 {
+            println!("Content preview: {}", &content[..std::cmp::min(content.len(), 200)]);
+        } else {
+            println!("Warning: Downloaded content is empty!");
+        }
+        
+        println!("Saving content to file: {}", metadata_path.display());
+        tokio::fs::write(&metadata_path, &content)
+            .await
+            .context(format!("Failed to write content to {}", metadata_path.display()))?;
+        
+        // Verify the file was written
+        if metadata_path.exists() {
+            println!("Successfully wrote metadata file");
+            let file_size = tokio::fs::metadata(&metadata_path)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+            println!("File size: {} bytes", file_size);
+        } else {
+            println!("Warning: File was not created!");
+        }
+        
+        content
     } else {
-        PathBuf::from(source)
+        println!("Reading local file {}", source);
+        tokio::fs::read_to_string(source).await?
     };
-    
-    Ok(assets_path)
-}
 
-fn get_default_auth() -> ((Option<String>, Option<String>), (Option<String>, Option<String>)) {
-    (
-        // Source auth
-        (
-            env::var("CLI_SYNC_SOURCE_USER").ok(),
-            env::var("CLI_SYNC_SOURCE_PASS").ok(),
-        ),
-        // Download auth
-        (
-            env::var("CLI_SYNC_DOWNLOAD_USER").ok(),
-            env::var("CLI_SYNC_DOWNLOAD_PASS").ok(),
-        )
-    )
+    // Now try parsing the content
+    println!("Parsing metadata from {}...", metadata_path.display());
+    
+    // Try parsing as raw value first to understand the structure
+    match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(value) => {
+            println!("Successfully parsed as JSON. Root structure: {}", 
+                if value.is_object() { "object" }
+                else if value.is_array() { "array" }
+                else { "other" }
+            );
+            
+            if let Some(obj) = value.as_object() {
+                println!("Available fields at root: {:?}", obj.keys().collect::<Vec<_>>());
+                if let Some(files) = obj.get("files") {
+                    if let Some(files_arr) = files.as_array() {
+                        println!("Found files array with {} items", files_arr.len());
+                    } else {
+                        println!("'files' field is not an array");
+                    }
+                }
+            }
+        }
+        Err(e) => println!("Failed to parse as raw JSON: {}", e),
+    }
+    
+    // Try parsing as a wrapper
+    match serde_json::from_str::<DrupalFileAssetsWrapper>(&content) {
+        Ok(wrapper) => {
+            println!("Successfully parsed as wrapper with {} files", wrapper.files.len());
+            Ok(wrapper.files)
+        }
+        Err(wrapper_err) => {
+            // If that fails, try parsing as an array
+            match serde_json::from_str::<Vec<DrupalFileAsset>>(&content) {
+                Ok(assets) => {
+                    println!("Successfully parsed as array with {} files", assets.len());
+                    Ok(assets)
+                }
+                Err(array_err) => {
+                    println!("Failed to parse as wrapper: {}", wrapper_err);
+                    println!("Failed to parse as array: {}", array_err);
+                    Err(anyhow::anyhow!("Failed to parse metadata as JSON: {}", wrapper_err))
+                }
+            }
+        }
+    }
 }
 
 async fn handle_sync_command(
-    assets_source: Option<String>,
-    base_url: String,
+    assets_metadata: &str,
+    destination: &Path,
+    base_url: &str,
+    max_concurrent: usize,
+    force: bool,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<()> {
+    // Get the current working directory
+    let current_dir = std::env::current_dir()?;
+    
+    // If destination is just a name (like "downloads"), make it relative to current directory
+    let destination = if destination.is_absolute() {
+        destination.to_path_buf()
+    } else {
+        current_dir.join(destination)
+    };
+
+    // Download or read metadata file
+    let assets = download_metadata(
+        assets_metadata,
+        &destination,
+        force,
+        username.clone(),
+        password.clone(),
+    )
+    .await?;
+
+    println!("Found {} assets to process", assets.len());
+
+    // Configure downloader
+    let config = DownloadConfig {
+        max_concurrent,
+        base_url: Some(base_url.to_string()),
+        username,
+        password,
+        ..Default::default()
+    };
+
+    let downloader = Downloader::new(config);
+    downloader.download_files(&assets, destination).await?;
+
+    Ok(())
+}
+
+async fn handle_config_command(
+    base_url: Option<String>,
+    desti_path: Option<String>,
     source_username: Option<String>,
     source_password: Option<String>,
     download_username: Option<String>,
     download_password: Option<String>,
-    max_concurrent: Option<usize>,
-    download_delay: Option<u64>,
-    download_timeout: Option<u64>,
-    max_retries: Option<usize>,
-    max_file_size: Option<u64>,
+    download_delay: u64,
+    download_timeout: u64,
+    max_retries: usize,
+    force: bool,
 ) -> Result<()> {
-    // Get default auth from environment if not provided
-    let ((default_source_user, default_source_pass), (default_download_user, default_download_pass)) = get_default_auth();
-    let source_username = source_username.or(default_source_user);
-    let source_password = source_password.or(default_source_pass);
-    let download_username = download_username.or(default_download_user);
-    let download_password = download_password.or(default_download_pass);
-
-    let default_path = get_default_assets_path()?;
+    let config_id = "default"; // Use a default config ID
     
-    // Get the assets file path and content
-    let (local_assets_path, new_assets_json) = match assets_source {
-        Some(source) => {
-            // If source is provided, download it
-            println!("Downloading assets source...");
-            let path = download_assets_source(
-                &source,
-                &source_username,
-                &source_password,
-            ).await?;
-            let content = tokio::fs::read_to_string(&path).await
-                .with_context(|| format!("Failed to read assets file: {}", path.display()))?;
-            println!("Assets source downloaded to: {}", path.display());
-            (path, content)
-        }
-        None => {
-            // If no source provided, try to use cached file
-            if !default_path.exists() {
-                anyhow::bail!(
-                    "No assets source provided and no cached assets found at {}. \
-                    Please provide an assets source using --assets-source", 
-                    default_path.display()
-                );
-            }
-            println!("Using cached assets from: {}", default_path.display());
-            let content = tokio::fs::read_to_string(&default_path).await
-                .with_context(|| format!("Failed to read assets file: {}", default_path.display()))?;
-            (default_path.clone(), content)
-        }
-    };
-
-    // Check if we need to sync
-    if assets_source.is_some() && default_path.exists() && local_assets_path != default_path {
-        // Compare new content with cached content
-        let cached_json = tokio::fs::read_to_string(&default_path).await
-            .with_context(|| format!("Failed to read cached assets: {}", default_path.display()))?;
-            
-        if new_assets_json == cached_json {
-            println!("No changes detected in assets file");
-            return Ok(());
-        }
-        println!("Changes detected in assets file, proceeding with sync");
-    }
-
-    // Parse the assets JSON
-    let assets: DrupalFileAssets = serde_json::from_str(&new_assets_json)?;
-    
-    // Print summary
-    println!("Found {} files to sync", assets.files.len());
-    println!("Total size: {} bytes", assets.total_size());
-    println!("Images: {}", assets.image_count());
-
-    // Group by MIME type
-    for (mime, files) in assets.group_by_mime() {
-        println!("{}: {} files", mime, files.len());
-    }
-
-    // Configure downloader
-    let download_config = DownloadConfig {
-        username: download_username,
-        password: download_password,
-        max_concurrent: max_concurrent.unwrap_or(5),
-        download_delay: download_delay.unwrap_or(0),
-        download_timeout: download_timeout.unwrap_or(30),
-        max_retries: max_retries.unwrap_or(3),
-        max_file_size,
-        base_url: Some(base_url),
-    };
-
-    let mut downloader = Downloader::new(download_config);
-    downloader.download_files(&assets.files).await?;
-
-    // If we downloaded from a new source, update the cache
-    if assets_source.is_some() && local_assets_path != default_path {
-        tokio::fs::copy(local_assets_path, default_path).await?;
-        println!("Updated assets cache");
-    }
-
-    Ok(())
-}
-
-async fn handle_list_command(
-    assets_source: String,
-    output: String,
-    base_url: Option<String>,
-) -> Result<()> {
-    // Create output directory if it doesn't exist
-    let output_path = PathBuf::from(output);
-    fs::create_dir_all(&output_path).await?;
-
-    // Check if assets_source is a URL or local path
-    let is_url = Url::parse(&assets_source).is_ok();
-
-    let config = AssetListingConfig {
-        base_url,
-        output_path,
-    };
-
-    if is_url {
-        // TODO: Implement URL handling
-        return Err(anyhow::anyhow!("URL source not yet implemented"));
+    // Try to load existing config or create new one
+    let mut config = if let Ok(existing) = CliConfig::load(config_id).await {
+        existing
     } else {
-        let source_path = PathBuf::from(assets_source);
-        generate_asset_listing(&source_path, &config).await?;
+        CliConfig::new(config_id.to_string(), ".".to_string()) // Default to current directory
+    };
+
+    // Update config with new values if provided
+    if let Some(url) = base_url {
+        config.base_url = Some(url);
     }
+    if let Some(path) = desti_path {
+        config.desti_path = path;
+    }
+    
+    // Update download settings
+    config.source_username = source_username;
+    config.source_password = source_password;
+    config.download_username = download_username;
+    config.download_password = download_password;
+    config.download_delay = download_delay;
+    config.download_timeout = download_timeout;
+    config.max_retries = max_retries;
+
+    // Save the updated config
+    config.save().await?;
+
+    println!("Configuration updated successfully:");
+    println!("  Base URL: {:?}", config.base_url);
+    println!("  Destination Path: {}", config.desti_path);
+    println!("  Source Username: {:?}", config.source_username);
+    println!("  Source Password: {:?}", config.source_password);
+    println!("  Download Username: {:?}", config.download_username);
+    println!("  Download Password: {:?}", config.download_password);
+    println!("  Download Delay: {}ms", config.download_delay);
+    println!("  Download Timeout: {}s", config.download_timeout);
+    println!("  Max Retries: {}", config.max_retries);
 
     Ok(())
 }
 
-async fn handle_watch_command(
-    assets_source: String,
-    base_url: String,
-    interval: u64,
-    username: Option<String>,
-    password: Option<String>,
-) -> Result<()> {
-    println!("Starting watch mode with {} second interval", interval);
-    
-    loop {
-        println!("Running sync at {}", Utc::now());
-        
-        if let Err(e) = handle_sync_command(
-            Some(assets_source.clone()),
-            base_url.clone(),
-            username.clone(),
-            password.clone(),
-            None,  // Use default max_concurrent
-            None,  // Use default download_delay
-            None,  // Use default download_timeout
-            None,  // Use default max_retries
-            None,  // Use default max_file_size
-        ).await {
-            eprintln!("Sync error: {}", e);
-        }
-
-        println!("Next sync scheduled at {}", Utc::now() + chrono::Duration::seconds(interval as i64));
-        tokio::time::sleep(tokio::time::Duration::from_secs(interval)).await;
-    }
+fn get_default_auth() -> (Option<String>, Option<String>) {
+    let source_username = env::var("CLI_SYNC_SOURCE_USER").ok();
+    let source_password = env::var("CLI_SYNC_SOURCE_PASS").ok();
+    (source_username, source_password)
 }
 
 #[tokio::main]
@@ -354,54 +374,59 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Config { base_url: _, desti_path: _ } => {
-            // TODO: Implement config handling
-            Ok(())
-        }
-        Commands::Sync { 
-            assets_source,
+        Commands::Sync {
+            assets_metadata,
+            destination,
             base_url,
+            max_concurrent,
             source_username,
             source_password,
             download_username,
             download_password,
-            max_concurrent,
             download_delay,
             download_timeout,
             max_retries,
-            max_file_size,
+            force,
         } => {
+            let assets_metadata = assets_metadata.ok_or_else(|| anyhow::anyhow!("No assets metadata provided"))?;
+            let destination = destination.unwrap_or_else(|| PathBuf::from("data"));
+
             handle_sync_command(
-                assets_source,
+                &assets_metadata,
+                &destination,
+                &base_url,
+                max_concurrent,
+                force,
+                download_username,
+                download_password,
+            )
+            .await
+        }
+        Commands::Config {
+            base_url,
+            desti_path,
+            source_username,
+            source_password,
+            download_username,
+            download_password,
+            download_delay,
+            download_timeout,
+            max_retries,
+            force,
+        } => {
+            handle_config_command(
                 base_url,
+                desti_path,
                 source_username,
                 source_password,
                 download_username,
                 download_password,
-                Some(max_concurrent),
-                Some(download_delay),
-                Some(download_timeout),
-                Some(max_retries),
-                max_file_size,
-            ).await
-        }
-        Commands::List { assets_source, output, base_url } => {
-            handle_list_command(assets_source, output, base_url).await
-        }
-        Commands::Watch { 
-            assets_source,
-            base_url,
-            interval,
-            username,
-            password,
-        } => {
-            handle_watch_command(
-                assets_source,
-                base_url,
-                interval,
-                username,
-                password,
-            ).await
+                download_delay,
+                download_timeout,
+                max_retries,
+                force,
+            )
+            .await
         }
     }
 }

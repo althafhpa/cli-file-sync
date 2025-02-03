@@ -1,44 +1,43 @@
-[
-  {
-    "fid": "48",
-    "filename": "sample-image.jpg",
-    "uri": "public://sample-image.jpg",
-    "real_path": "sites/default/files/sample-image.jpg",
-    "source": "file",
-    "metadata": {
-      "filesize": 178567,
-      "filemime": "image/jpeg",
-      "changed": 1349155742,
-      "created": 1349155742,
-      "md5": "5fe94c2b9ecab79578630eb259eaf8a8",
-      "permissions": "0664",
-      "uid": 1000,
-      "gid": 1000,
-      "inode": 124726
+{
+    "version": "1.0",
+    "generated": 1738529581,
+    "source": {
+        "type": "application",
+        "version": "10.3.10"
     },
-    "usage": {
-      "file": ["media"]
-    }
-  },
-  {
-    "fid": "50",
-    "filename": "sample-document.pdf",
-    "uri": "public://sample-document.pdf",
-    "real_path": "sites/default/files/sample-document.pdf",
-    "source": "file",
-    "metadata": {
-      "filesize": 1024567,
-      "filemime": "application/pdf",
-      "changed": 1349155999,
-      "created": 1349155900,
-      "md5": "7ae94c2b9ecab79578630eb259eaf8b9",
-      "permissions": "0664",
-      "uid": 1000,
-      "gid": 1000,
-      "inode": 124727
-    },
-    "usage": {
-      "file": ["document"]
-    }
-  }
-]
+        "files": [
+        {
+            "id": "2",
+            "filename": "IMG_0962.JPG",
+            "uri": "public://IMG_0962.JPG",
+            "path": "sites/default/files/IMG_0962.JPG",
+            "mime": "image/jpeg",
+            "size": 83257,
+            "created": 1459384497,
+            "changed": 1459384497,
+            "scheme": "public"
+        },
+        {
+            "id": "3",
+            "filename": "472.pdf",
+            "uri": "public://article/downloads/472.pdf",
+            "path": "",
+            "mime": "application/pdf",
+            "size": 59730,
+            "created": 1336113916,
+            "changed": 1336113916,
+            "scheme": "public"
+        },
+        {
+            "id": "5",
+            "filename": "test-document.txt",
+            "uri": "public://article/downloads/test-document.txt",
+            "path": "",
+            "mime": "text/plain",
+            "size": 13,
+            "created": 1336365768,
+            "changed": 1336365768,
+            "scheme": "public"
+        }
+    ]
+}

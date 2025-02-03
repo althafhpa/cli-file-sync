@@ -1,26 +1,35 @@
-{
-    "files": [
-        {
-            "id": "878296",
-            "filename": "manufacturing-copper-wires.jpg",
-            "uri": "public://2025-01/manufacturing-copper-wires.jpg",
-            "path": "sites/default/files/2025-01/manufacturing-copper-wires.jpg",
-            "mime": "image/jpeg",
-            "size": 825950,
-            "created": 1736218536,
-            "changed": 1736218540,
-            "scheme": "public"
-        },
-        {
-            "id": "878301",
-            "filename": "tech-industry-report-2025.pdf",
-            "uri": "public://2025-01/tech-industry-report-2025.pdf",
-            "path": "sites/default/files/2025-01/tech-industry-report-2025.pdf",
-            "mime": "application/pdf",
-            "size": 106699,
-            "created": 1736218630,
-            "changed": 1736218636,
-            "scheme": "public"
-        }
-    ]
-}
+[
+    {
+        "id": "2",
+        "filename": "IMG_0962.JPG",
+        "uri": "public://IMG_0962.JPG",
+        "path": "sites/default/files/IMG_0962.JPG",
+        "mime": "image/jpeg",
+        "size": 83257,
+        "created": 1459384497,
+        "changed": 1459384497,
+        "scheme": "public"
+    },
+    {
+        "id": "3",
+        "filename": "472.pdf",
+        "uri": "public://article/downloads/472.pdf",
+        "path": "",
+        "mime": "application/pdf",
+        "size": 59730,
+        "created": 1336113916,
+        "changed": 1336113916,
+        "scheme": "public"
+    },
+    {
+        "id": "5",
+        "filename": "test-document.txt",
+        "uri": "public://article/downloads/test-document.txt",
+        "path": "",
+        "mime": "text/plain",
+        "size": 13,
+        "created": 1336365768,
+        "changed": 1336365768,
+        "scheme": "public"
+    }
+]
